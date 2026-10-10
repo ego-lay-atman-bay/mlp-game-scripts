@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 def find_first(sequence: list, condition: Callable):
     try:
@@ -40,3 +41,9 @@ def traditional_round(num: float | int, ndigits: int = 0) -> int | float:
         rounded *= 10 ** -ndigits
 
     return float(rounded) if ndigits > 0 else int(rounded)
+
+
+DATE_FORMAT: str = '%Y-%m-%d %H:%M:%SZ'
+
+def parse_date(date: str, format: str = DATE_FORMAT, tzinfo: timezone = timezone.utc) -> datetime:
+    return datetime.strptime(date, format).replace(tzinfo = tzinfo)

@@ -1,4 +1,5 @@
 from typing import TYPE_CHECKING
+from datetime import timedelta
 
 from .cli import CLI, CLICommand
 
@@ -26,6 +27,8 @@ PATHS = {
     'fullscale_pinkie_pie_generic': 'Pinkie Pie',
     'fullscale_starlight_glimmer_generic_flipped': 'Starlight Glimmer',
     'fullscale_twist_generic': 'Twist',
+    'fullscale_pinkie_pie_generic_flipped': 'Pinkie Pie',
+    'fullscale_princess_celestia_generic_flipped': 'Princess Celestia',
 
     'gui/gnr_img_questgiver_applejack.png': 'Applejack',
     'gui/gnr_img_questgiver_fluttershy.png': 'Fluttershy',
@@ -34,6 +37,10 @@ PATHS = {
     'gui/gnr_img_questgiver_rainbowdash.png': 'Rainbow Dash',
     'gui/gnr_img_questgiver_rarity.png': 'Rarity',
     'gui/gnr_img_questgiver_pinkypie.png': 'Pinkie Pie',
+    'gui/gnr_img_questgiver_spike.png': 'Grown-Up Spike',
+    'gui/gnr_img_questgiver_marian.png': 'Marian',
+    'gui/gnr_img_questgiver_dashing_dignitary.png': 'Dashing Dignitary',
+    'gui/gnr_img_questgiver_fancy_shmancy.png': 'Fancy Shmancy',
 }
 
 
@@ -72,6 +79,7 @@ class QuestCommand(CLICommand):
         from luna_kit.cinematictable import CinematicTable
         from luna_kit.xml import parse_xml
         from luna_kit.typings import DefaultGameCampaignType
+        from luna_kit.typings.PonyTasks import PonyTask, PonyTasksType
 
         self.gameobjectdata = GameObjectData(os.path.join(self.args.game_folder, 'gameobjectdata.xml'))
         
@@ -79,9 +87,9 @@ class QuestCommand(CLICommand):
             defaultGameCampaign: DefaultGameCampaignType = json.load(file)
         
         with open(os.path.join(self.args.game_folder, 'ponytasks.json'), 'r') as file:
-            ponytasks: dict[str, list[dict[str, str | int]]] = json.load(file)
+            ponytasks: PonyTasksType = json.load(file)
         
-        self.ponytasks: dict[str, dict[str, str | int]] = {}
+        self.ponytasks: dict[str, PonyTask] = {}
 
         for task in ponytasks['PonyTasks']:
             self.ponytasks[task['ID']] = task.copy()
@@ -152,7 +160,7 @@ class QuestCommand(CLICommand):
         from textwrap import dedent
         from ..utils import traditional_round
         
-        result = f"== {category[0].category} ==\n"
+        result = f"=== {category[0].category} ===\n"
 
         for quest in category:
             quest_template = ''
@@ -161,50 +169,61 @@ class QuestCommand(CLICommand):
                 if event.type == 'PlayCinematic':
                     quest_template += '\n' + self.get_dialogue(self.cinematictable.get(event.value)) + '\n'
 
-            quest_template += dedent(f"""
-                {{{{Quest
-                |name={self.loc.translate(quest.info.title)}
-                |giver={self.path_to_name(quest.info.giver_image)}
-                |intro={self.loc.translate(quest.info.description)}
-                """)
-            
-            for i, task in enumerate(quest.task_list, 1):
-                quest_template += f"|task{i}={self.loc.translate(task.description)}\n"
-                if task.skippable:
-                    quest_template += f"|skip{i}={{{{Item|Gem|amount={task.skip_cost}}}}}"
-                    
-                    if not task.no_skip_by_ads:
-                        quest_template += f' or {traditional_round(task.skip_cost * 0.7)} ad watches'
+            if not quest.info.invisible_quest:
+                quest_name = self.loc.translate(quest.info.title)
+                quest_template += f"\n==== {quest_name} ====\n"
+                
+                quest_template += dedent(f"""
+                    {{{{Quest
+                    |name={self.loc.translate(quest.info.title)}
+                    |giver={self.path_to_name(quest.info.giver_image)}
+                    |intro={self.loc.translate(quest.info.description)}
+                    """)
+                
+                for i, task in enumerate(quest.task_list, 1):
+                    quest_template += f"|task{i}={self.loc.translate(task.description)}\n"
+                    if task.skippable:
+                        quest_template += f"|skip{i}={{{{Item|Gem|amount={task.skip_cost}}}}}"
+                        
+                        if not task.no_skip_by_ads:
+                            quest_template += f' or {traditional_round(task.skip_cost * 0.7)} ad watches'
 
-                    quest_template += '\n'
-                
-                pony_task = ''
-                for count in task.counts:
-                    match count.category:
-                        case 'CompleteTask':
-                            pony_task = self.ponytasks[count.sub_object]
-                            quest_template += f"|timer{i}={pony_task['Duration']}\n"
+                        quest_template += '\n'
                     
-                    # if count.value > 1:
-                    quest_template += f'|times{i}={count.value:,}\n'
+                    pony_task = ''
+                    count = task.counts
+                    if count:
+                        match count.category:
+                            case 'CompleteTask':
+                                pony_task = self.ponytasks[count.sub_object]
+                                quest_template += f"|timer{i}={self.format_duration(pony_task['Duration'])}\n"
+                        
+                        # if count.value > 1:
+                        quest_template += f'|times{i}={count.value:,}\n'
+                    
                 
-            
-            quest_template += f"|xp={quest.rewards.xp}\n"
-            if quest.rewards.bits:
-                quest_template += f"|bit={quest.rewards.bits}\n"
-            if quest.rewards.gems:
-                quest_template += f"|gem={quest.rewards.gems}\n"
-            if quest.rewards.item.id:
-                reward = quest.rewards.item.id
-                reward_obj = self.gameobjectdata.get_object(reward)
-                if reward_obj is not None and reward_obj.category == 'Pony':
-                    name = self.loc.translate(reward_obj.get('Name', {}).get('Unlocal', reward_obj.id))
-                    reward = f'[[File:{name} portrait.png]]'
-                
-                quest_template += f"|reward={reward}\n"
-                if quest.rewards.item.alt_value:
-                    quest_template += f'|alt_reward={quest.rewards.item.alt_value}\n'
-            quest_template += f"|outro={self.loc.translate(quest.info.complete_description)}\n}}}}"
+                quest_template += f"|xp={quest.rewards.xp}\n"
+                if quest.rewards.bits:
+                    quest_template += f"|bit={quest.rewards.bits}\n"
+                if quest.rewards.gems:
+                    quest_template += f"|gem={quest.rewards.gems}\n"
+                if quest.rewards.item.id:
+                    reward = quest.rewards.item.id
+                    reward_obj = self.gameobjectdata.get_object(reward)
+                    if reward_obj is not None:
+                        if reward_obj.category == 'Pony':
+                            name = self.loc.translate(reward_obj.get('Name', {}).get('Unlocal', reward_obj.id))
+                            reward = f'[[File:{name} portrait.png]]'
+                        elif reward_obj.category == 'Pony_House':
+                            name = self.loc.translate(reward_obj.get('Name', {}).get('Unlocal', reward_obj.id))
+                            reward = f'[[File:{name}.png]]'
+
+                        
+                    
+                    quest_template += f"|reward={reward}\n"
+                    if quest.rewards.item.alt_value:
+                        quest_template += f'|alt_reward={quest.rewards.item.alt_value}\n'
+                quest_template += f"|outro={self.loc.translate(quest.info.complete_description)}\n}}}}"
             
             for event in quest.events.end:
                 if event.type == 'PlayCinematic':
@@ -229,8 +248,24 @@ class QuestCommand(CLICommand):
             )
         
         return '\n'.join(lines)
+
+    def format_duration(self, duration: int):
+        hours, remainder = divmod(duration, 3600)
+        minutes, seconds = divmod(remainder, 60)
+
+        components = []
+        if hours:
+            components.append(f'{hours}h')
+        if minutes:
+            components.append(f'{minutes}m')
+        if seconds or len(components) == 0:
+            components.append(f'{seconds}m')
+        
+        return ' '.join(components)
     
     def path_to_name(self, path: str):
+        if path not in PATHS:
+            print(f'unknown path: {path}')
         return PATHS.get(path, path)
 
             
